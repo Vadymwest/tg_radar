@@ -1,0 +1,7 @@
+.env
+*.session
+*.session-journal
+processed_users.json
+last_ids.json
+__pycache__/
+*.py[cod]

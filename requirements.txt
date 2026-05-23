@@ -1,0 +1,4 @@
+pyrogram
+tgcrypto
+openai
+python-dotenv
