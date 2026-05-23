@@ -1,59 +1,79 @@
-import os
+"""
+radar/ai_handler.py — Анализ сообщений через OpenAI GPT-4o-mini
+"""
+
 import json
-from openai import AsyncOpenAI
+import os
+
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
 load_dotenv()
 
-client = AsyncOpenAI()
+client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-SYSTEM_PROMPT = (
-    "You are a strict, cynical IT lead filtering assistant. "
-    "Your single job is to find tasks related ONLY to PC, software, and automation.\n\n"
+SYSTEM_PROMPT = """
+Ты — жёсткий фильтр IT-лидов. Твоя единственная задача: определить, есть ли в сообщении РЕАЛЬНЫЙ запрос на разработку софта или автоматизацию.
 
-    "CORE TARGETS (Set is_lead = true ONLY for these):\n"
-    "- Python development, custom scripts, parsing, web scraping, and automation.\n"
-    "- Telegram bots, discord bots, or any API integrations "
-    "(KuCoin, Bybit, OpenAI, LinkedIn, etc.).\n"
-    "- Web automation, anti-detect browsers, multi-accounting setups, proxy, "
-    "account warming, or human emulation tasks.\n"
-    "- Algorithmic trading bots, trading scripts, or tech assistants for games.\n"
-    "- Technical PC assistance, server setups, or resolving code errors.\n\n"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ is_lead: TRUE — ТОЛЬКО ЭТИ СЛУЧАИ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Нужен Python-скрипт, парсер, бот, автоматизация, API-интеграция.
+- Нужен Telegram/Discord бот, юзербот, инвайтер, рассыльщик.
+- Задача с антидетектом, прокси, мультиаккаунтингом, обходом защит.
+- Торговый бот, снайпер, скальпер, алготрейдинг.
+- Нужен разработчик с конкретным стеком (Python, JS, aiogram, FastAPI и т.д.).
+- Ошибка в коде / баг / не работает скрипт — просят починить.
+- Настройка сервера, VPS, деплой, Docker — с техническим контекстом.
 
-    "STRICT NO-GO ZONES (Set is_lead = false FOR ALL OF THESE, NO EXCEPTIONS):\n\n"
+ПРАВИЛО: Без явной технической боли или конкретного стека — НЕ ЛИД.
 
-    "1. SCAM FONTS & OBFUSCATION: If the text contains unusual unicode characters, "
-    "mixed scripts, gothic/decorative letters, or obfuscated words "
-    "(e.g. '𐌿ρᥙᴦ᧘ᥲɯᥲᥱʍ', 'ρᥲδ᧐ᴛу', 'ᴡᴏʀᴋ'), "
-    "set is_lead: false IMMEDIATELY. Do NOT attempt to decode or interpret it. "
-    "Obfuscated text = 100% spam, no exceptions.\n\n"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ is_lead: FALSE — ЖЁСТКИЕ ЗАПРЕТЫ (БЕЗ ИСКЛЮЧЕНИЙ)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    "2. MICRO-TASKS & ACCOUNT TRADING: Any mention of "
-    "'регистрация на сайте', 'верификация аккаунта', 'продажа аккаунтов', "
-    "'купить KYC', 'дропы', 'слив трафика', 'накрутка', 'буксы', 'заработок кликами', "
-    "или дешёвые ручные задачи за 100-500 руб/грн — set is_lead: false. "
-    "These are low-value micro-tasks, not IT development.\n\n"
+1. БАНКОВСКИЕ ДРОПЫ И KYC-СХЕМЫ:
+   Любое упоминание: "оформление карт", "регистрация карты", "Пивденный", "А-Банк",
+   "Монобанк", "ПриватБанк" (в контексте оформления), "кредит", "верификация аккаунта",
+   "дроп", "дропер", "дроповод", "дроповодство", "дропы на карты", "обнал", "вывод нала",
+   "обналичивание", "KYC", "пробив" — СРАЗУ false. Это финансовые схемы, не IT.
 
-    "3. PHYSICAL & SHADY WORK: Phrases like 'работа руками', 'без вложений', "
-    "'за выход', 'выплаты ежедневно', 'лёгкий заработок', 'удалённая работа' "
-    "(without any technical context), cash courier, or any offer that sounds "
-    "like a street job — set is_lead: false.\n\n"
+2. МУТНЫЙ ЗАРАБОТОК БЕЗ ТЕХНИЧЕСКОГО СТЕКА:
+   "кто хочет подзаработать", "лёгкие деньги", "оплата на руки", "оплата сразу",
+   "без вложений", "без опыта", "за выход", "выплаты ежедневно", "задача за N грн/руб"
+   (без указания конкретной технологии), "оплата после регистрации", "быстрый заработок",
+   "гарантированная оплата" — СРАЗУ false.
 
-    "4. GENERAL NO-GO: Physical world services (logistics, moving, перевозки, переезды, "
-    "cargo, delivery, construction, cleaning), copywriting, video editing, "
-    "logo design, SMM, crypto signals, channel promotions, "
-    "buying/selling physical items — set is_lead: false.\n\n"
+3. СПАМ-ШРИФТЫ И ОБФУСКАЦИЯ:
+   Текст содержит unicode-иероглифы, готические буквы, декоративные символы,
+   смешанные скрипты для обхода фильтров (например: '𐌿ρᥙᴦ', 'ᴡᴏʀᴋ', 'ρᥲδ᧐ᴛу') —
+   СРАЗУ false. Не пытайся декодировать. Обфускация = спам, всегда.
 
-    "5. HALLUCINATION GUARD: If the text is unreadable, heavily obfuscated, "
-    "or you cannot clearly identify a concrete technical task — "
-    "do NOT assume it is IT work. Set is_lead: false.\n\n"
+4. МИКРОТАСКИ И РУЧНАЯ РАБОТА:
+   "регистрация на сайте", "подтвердить аккаунт", "продажа аккаунтов", "накрутка",
+   "буксы", "клики", "лайки", "подписки", "слив трафика", "дешёвые ручные задачи" —
+   false. Это не разработка.
 
-    "DECISION RULE: When in doubt — reject. A false negative (missing a real lead) "
-    "is far better than a false positive (passing spam to the user).\n\n"
+5. ФИЗИЧЕСКИЙ МИР И ОФЛАЙН:
+   Логистика, перевозки, переезды, курьер, стройка, уборка, доставка, склад,
+   "работа руками" — false. Нас интересует только цифровой продукт.
 
-    "Answer strictly in JSON format: "
-    '{\"is_lead\": true/false, \"summary\": \"Краткая суть задачи на русском языке\"}'
-)
+6. НЕ-IT ДИДЖИТАЛ:
+   Копирайтинг, дизайн логотипов, монтаж видео, SMM, продвижение каналов,
+   крипто-сигналы, продажа курсов, реклама товаров — false.
+
+7. ГАЛЛЮЦИНАЦИЯ-ЗАЩИТА:
+   Текст нечитаем, слишком короткий (<10 слов без контекста), или ты не можешь
+   однозначно определить техническую задачу — false. Не додумывай.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ГЛАВНОЕ ПРАВИЛО: СОМНЕВАЕШЬСЯ — ОТКЛОНЯЙ.
+Пропустить реальный лид лучше, чем пропустить скам.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Ответ СТРОГО в JSON без markdown:
+{"is_lead": true/false, "summary": "Краткая суть задачи на русском (1-2 предложения)"}
+""".strip()
 
 
 async def analyze_message_with_ai(message_text: str) -> tuple[bool, str]:
@@ -68,15 +88,19 @@ async def analyze_message_with_ai(message_text: str) -> tuple[bool, str]:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user",   "content": message_text},
             ],
-            response_format={"type": "json_object"},  # строгий JSON на выходе
-            temperature=0.0,                           # максимальная точность
+            response_format={"type": "json_object"},
+            temperature=0.0,  # максимальная детерминированность
+            max_tokens=256,
         )
 
-        raw_content = response.choices[0].message.content
-        data        = json.loads(raw_content)
+        raw  = response.choices[0].message.content or ""
+        data = json.loads(raw)
 
-        return data.get("is_lead", False), data.get("summary", "")
+        return bool(data.get("is_lead", False)), str(data.get("summary", ""))
 
+    except json.JSONDecodeError as exc:
+        print(f"[AI Error] Невалидный JSON от OpenAI: {exc}")
+        return False, ""
     except Exception as exc:
-        print(f"[AI Error] Ошибка при анализе сообщения: {exc}")
+        print(f"[AI Error] Ошибка при анализе: {exc}")
         return False, ""
